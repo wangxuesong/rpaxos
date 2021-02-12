@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package paxos;
+
+// 每一轮的编号，全局唯一
+// number: 本地单调递增计数器
+// proposer_id: 全局唯一 ID
+message RoundNum {
+  int64 number = 1;
+  int64 proposer_id = 2;
+}
+
+// 保存的值，此处为整型
+message Value {
+  int64 value = 1;
+}
+
+// 一个 Paxos 实例，对应一次完整的投票
+message PaxosInstanceId {
+  string key = 1;
+  int64  version = 2;
+}
+
+message Acceptor {
+  RoundNum round = 1;
+  RoundNum last_round = 2;
+  Value value = 3;
+}
+
+message Proposer {
+  PaxosInstanceId Id = 1;
+  RoundNum round = 2;
+  Value value = 3;
+}
+
+service Paxos {
+  rpc Prepare (Proposer) returns (Acceptor) {}
+  rpc Accept (Proposer) returns (Acceptor) {}
+}
