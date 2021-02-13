@@ -7,6 +7,18 @@ build = "build.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+name = "rpaxos"
+path = "src/lib.rs"
+
+[[bin]]
+name = "server"
+path = "src/main.rs"
+
+[[bin]]
+name="client"
+path= "src/client.rs"
+
 [dependencies]
 tonic = "0.4.0"
 prost = "0.7.0"
