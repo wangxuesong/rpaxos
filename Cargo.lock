@@ -543,10 +543,19 @@ name = "rpaxos"
 version = "0.1.0"
 dependencies = [
  "prost",
+ "scopeguard",
  "tokio",
+ "tokio-test",
  "tonic",
  "tonic-build",
+ "triggered",
 ]
+
+[[package]]
+name = "scopeguard"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d29ab0c6d3fc0ee92fe66e2d99f700eab17a8d57d1c1d3b748380fb20baa78cd"
 
 [[package]]
 name = "slab"
@@ -646,6 +655,19 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+]
+
+[[package]]
+name = "tokio-test"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7c7d205f6f59b03f9e824ac86eaba635a98395f287756ecc8a06464779c399bf"
+dependencies = [
+ "async-stream",
+ "bytes",
+ "futures-core",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]
@@ -777,6 +799,12 @@ dependencies = [
  "pin-project 0.4.27",
  "tracing",
 ]
+
+[[package]]
+name = "triggered"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3aa15a5f3ffd17f7c101155c6e7cf9c4060ee767730eb53c0580e452c3725af1"
 
 [[package]]
 name = "try-lock"

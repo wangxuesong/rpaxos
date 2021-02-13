@@ -12,5 +12,10 @@ tonic = "0.4.0"
 prost = "0.7.0"
 tokio = { version = "1.2.0", features = ["rt-multi-thread", "macros", "sync", "time"] }
 
+[dev-dependencies]
+triggered = "0.1.1"
+scopeguard = "1.1.0"
+tokio-test = "0.4.0"
+
 [build-dependencies]
-tonic-build = "0.4.0"
+tonic-build = { version = "0.4.0", features = ["prost"] }

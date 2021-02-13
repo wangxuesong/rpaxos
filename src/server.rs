@@ -70,13 +70,56 @@ impl Paxos for PaxosService {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::paxos::paxos_server::PaxosServer;
     use crate::paxos::{PaxosInstanceId, RoundNum, Value};
-    use tokio::runtime::Runtime;
+    use scopeguard::defer;
+    use std::thread::JoinHandle;
+    use tokio_test::block_on;
+    use tonic::transport::Server;
+    use triggered::Listener;
+
+    #[tokio::main]
+    async fn serve(singal: Listener) -> Result<(), tonic::transport::Error> {
+        let addr = "[::1]:11030".parse().unwrap();
+
+        println!("PaxosServer listening on: {}", addr);
+
+        let service = PaxosService {
+            storage: Default::default(),
+        };
+
+        let svc = PaxosServer::new(service);
+
+        Server::builder()
+            .add_service(svc)
+            .serve_with_shutdown(addr, async {
+                singal.await;
+            })
+            .await?;
+
+        println!("PaxosServer exit");
+        Ok(())
+    }
+
+    fn start_server(signal: Listener) -> JoinHandle<()> {
+        let handler = std::thread::spawn(move || {
+            let _ = serve(signal);
+        });
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        handler
+    }
 
     #[test]
     fn test_prepare() {
+        let (trigger, signal) = triggered::trigger();
+        defer! {
+            trigger.trigger();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let _ = start_server(signal);
         let service = PaxosService {
             storage: Default::default(),
         };
@@ -92,7 +135,7 @@ mod tests {
             value: Some(Value { value: 11 }),
         });
         let result = service.prepare(r0);
-        let r = Runtime::new().unwrap().block_on(result);
+        let r = block_on(result);
         assert!(r.is_ok());
         let resp = r.unwrap();
         let acc = resp.get_ref();
@@ -119,7 +162,7 @@ mod tests {
             }),
             value: Some(Value { value: 03 }),
         });
-        let r = Runtime::new().unwrap().block_on(service.prepare(r1));
+        let r = block_on(service.prepare(r1));
         assert!(r.is_ok());
         let resp = r.unwrap();
         let acc = resp.get_ref();
@@ -156,7 +199,7 @@ mod tests {
             value: Some(Value { value: 11 }),
         };
         let r0 = Request::new(proposer.clone());
-        let r = Runtime::new().unwrap().block_on(service.prepare(r0));
+        let r = block_on(service.prepare(r0));
         assert!(r.is_ok());
         let resp = r.unwrap();
         let acc = resp.get_ref();
@@ -172,9 +215,7 @@ mod tests {
             acc
         );
 
-        let r = Runtime::new()
-            .unwrap()
-            .block_on(service.accept(Request::new(proposer.clone())));
+        let r = block_on(service.accept(Request::new(proposer.clone())));
         assert!(r.is_ok());
         let resp = r.unwrap();
         let acc = resp.get_ref();
@@ -182,7 +223,7 @@ mod tests {
             &Acceptor {
                 round: Some(RoundNum {
                     number: 0,
-                    proposer_id: 0
+                    proposer_id: 0,
                 }),
                 last_round: Some(RoundNum {
                     number: 1,
