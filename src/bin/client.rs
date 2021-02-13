@@ -1,7 +1,6 @@
 extern crate rpaxos;
 
-use rpaxos::paxos::paxos_client::PaxosClient;
-use rpaxos::paxos::*;
+use rpaxos::{PaxosClient, PaxosInstanceId, Proposer, RoundNum};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -16,7 +15,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             number: 1,
             proposer_id: 1,
         }),
-        value: Some(Value { value: 0 }),
+        value: None,
     });
 
     let response = client.prepare(request).await?;

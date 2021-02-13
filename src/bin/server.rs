@@ -1,7 +1,7 @@
 extern crate rpaxos;
 
-use rpaxos::paxos::paxos_server::PaxosServer;
-use rpaxos::server::PaxosService;
+use rpaxos::PaxosServer;
+use rpaxos::PaxosService;
 use tonic::transport::Server;
 
 #[tokio::main]
