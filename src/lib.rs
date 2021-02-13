@@ -1,2 +1,2 @@
-mod paxos;
-mod server;
+pub mod paxos;
+pub mod server;

@@ -13,11 +13,11 @@ path = "src/lib.rs"
 
 [[bin]]
 name = "server"
-path = "src/main.rs"
+path = "src/bin/server.rs"
 
 [[bin]]
 name="client"
-path= "src/client.rs"
+path= "src/bin/client.rs"
 
 [dependencies]
 tonic = "0.4.0"

@@ -1,8 +1,7 @@
-mod paxos;
-mod server;
+extern crate rpaxos;
 
-use crate::paxos::paxos_client::PaxosClient;
-use crate::paxos::*;
+use rpaxos::paxos::paxos_client::PaxosClient;
+use rpaxos::paxos::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
