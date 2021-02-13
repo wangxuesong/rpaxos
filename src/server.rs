@@ -1,5 +1,5 @@
 use crate::paxos::paxos_server::Paxos;
-use crate::paxos::{Acceptor, Proposer};
+use crate::paxos::{Acceptor, Proposer, RoundNum};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tonic::{Request, Response, Status};
@@ -15,26 +15,33 @@ impl Paxos for PaxosService {
         let proposer = request.get_ref();
         let id = proposer.id.clone().unwrap();
         let key = id.key;
-        let ver = id.version;
-        let round = proposer.round.as_ref().unwrap();
+        let request_round = proposer.round.as_ref().unwrap();
+        let request_value = proposer.value.clone().unwrap();
 
+        // for lock storage
         {
-            // for lock storage
-            let storage = self.storage.lock().unwrap();
+            let mut storage = self.storage.lock().unwrap();
             if storage.contains_key(&key) {
                 let mut value = storage.get(&key).cloned().unwrap();
-                if round.number > value.round.as_ref().unwrap().number {
-                    value.round = Some(round.clone());
+                if request_round.number > value.round.as_ref().unwrap().number {
+                    // 保存请求中的 round 到 last_round
+                    let new_value = Acceptor {
+                        round: Some(request_round.clone()),
+                        last_round: Some(request_round.clone()),
+                        value: Some(request_value),
+                    };
+                    storage.insert(key, new_value);
                 }
                 Ok(Response::new(value))
             } else {
                 let acc = Acceptor {
-                    round: proposer.round.clone(),
-                    last_round: proposer.round.clone(),
-                    value: proposer.value.clone(),
+                    round: Some(RoundNum::default()),
+                    last_round: Some(RoundNum::default()),
+                    value: None,
                 };
-                let mut s = storage;
-                s.insert(key, acc.clone());
+                let mut acceptor = acc.clone();
+                acceptor.last_round = proposer.round.clone();
+                storage.insert(key, acceptor);
                 Ok(Response::new(acc))
             }
         } // unlock storage
@@ -61,7 +68,7 @@ mod tests {
                 version: 0,
             }),
             round: Some(RoundNum {
-                number: 0,
+                number: 1,
                 proposer_id: 0,
             }),
             value: Some(Value { value: 11 }),
@@ -73,17 +80,44 @@ mod tests {
         let acc = resp.get_ref();
         assert_eq!(
             &Acceptor {
-                round: Some(RoundNum {
-                    number: 0,
-                    proposer_id: 0
-                }),
+                round: Some(RoundNum::default()),
                 last_round: Some(RoundNum {
                     number: 0,
-                    proposer_id: 0
+                    proposer_id: 0,
                 }),
-                value: Some(Value { value: 11 })
+                value: None,
             },
             acc
+        );
+
+        let r1 = Request::new(Proposer {
+            id: Some(PaxosInstanceId {
+                key: "test".to_string(),
+                version: 0,
+            }),
+            round: Some(RoundNum {
+                number: 2,
+                proposer_id: 0,
+            }),
+            value: Some(Value { value: 03 }),
+        });
+        let r = Runtime::new().unwrap().block_on(service.prepare(r1));
+        assert!(r.is_ok());
+        let resp = r.unwrap();
+        let acc = resp.get_ref();
+        assert_eq!(
+            acc,
+            &Acceptor {
+                round: Some(RoundNum {
+                    number: 0,
+                    proposer_id: 0,
+                }),
+                last_round: Some(RoundNum {
+                    number: 1,
+                    proposer_id: 0,
+                }),
+                value: None,
+            }
         );
     }
 }
