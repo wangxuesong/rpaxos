@@ -1,3 +1,53 @@
+use crate::{PaxosClient, PaxosInstanceId, Proposer, Value};
+use anyhow::Result;
+use std::convert::TryFrom;
+use tonic::transport::Endpoint;
+
+#[derive(Debug)]
+pub struct Client {
+    servers: Vec<String>,
+    proposer: Proposer,
+}
+
+impl Client {
+    pub fn new(servers: Vec<String>) -> Self {
+        Client {
+            servers,
+            proposer: Proposer {
+                id: Some(PaxosInstanceId {
+                    key: "sh".to_string(),
+                    version: 0,
+                }),
+                round: Some(Default::default()),
+                value: None,
+            },
+        }
+    }
+
+    pub fn run_round(&self, value: Option<Value>) -> Result<Option<Value>> {
+        unimplemented!();
+    }
+
+    async fn phase1(&self, svr: Option<Vec<i32>>) -> Result<Option<Value>> {
+        // connect to server
+        let addr = format!("http://{}", self.servers[0].clone());
+        let dst = Endpoint::try_from(addr).unwrap();
+        let mut client = PaxosClient::connect(dst).await?;
+
+        // send propose to server
+        let reply = client.prepare(self.proposer.clone()).await?;
+
+        // collected reply
+        let acc = reply.get_ref();
+        let value = acc.value.clone();
+        Ok(value)
+    }
+
+    fn phase2(&self, svr: Vec<i32>) -> Result<()> {
+        unimplemented!();
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -73,6 +123,16 @@ mod test {
             self.triggers.clear();
             Ok(())
         }
+    }
+
+    fn server_address(count: i32) -> Vec<String> {
+        let mut addrs = vec![];
+        for i in 0..count {
+            let port = BASE_PORT + i;
+            let addr = format!("[::1]:{}", port);
+            addrs.push(addr);
+        }
+        addrs
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -182,5 +242,11 @@ mod test {
         defer! {
             server.stop();
         }
+        let servers = server_address(3);
+        let client = Client::new(servers);
+        let res = client.phase1(None).await;
+        assert!(res.is_ok(), res.err().unwrap().to_string());
+        let value = res.unwrap();
+        assert!(value.is_none());
     }
 }
