@@ -20,7 +20,7 @@ impl Client {
                     version: 0,
                 }),
                 round: Some(Default::default()),
-                value: None,
+                value: Some(Value { value: 11 }),
             },
         }
     }
@@ -30,7 +30,7 @@ impl Client {
     }
 
     async fn phase1(&self, svr: Option<Vec<i32>>) -> Result<Option<Value>> {
-        let mut svr = if let Some(v) = svr {
+        let svr = if let Some(v) = svr {
             v
         } else {
             (0..self.servers.len() as i32).collect()
@@ -39,9 +39,9 @@ impl Client {
         // connect to server
         let mut f = vec![];
         for s in svr {
-            let addr = format!("http://{}", self.servers[0].clone());
+            let addr = format!("http://{}", self.servers[s as usize].clone());
             let dst = Endpoint::try_from(addr).unwrap();
-            let mut client = PaxosClient::connect(dst);
+            let client = PaxosClient::connect(dst);
             f.push(client);
         }
         let clients = join_all(f).await;
@@ -49,7 +49,7 @@ impl Client {
         // send propose to server
         let mut f = vec![];
         for c in clients {
-            let mut client = (c.unwrap());
+            let mut client = c.unwrap();
             let r = client.prepare(self.proposer.clone()).await;
             match r {
                 Ok(resp) => {
@@ -81,8 +81,53 @@ impl Client {
         Ok(value)
     }
 
-    fn phase2(&self, svr: Vec<i32>) -> Result<()> {
-        unimplemented!();
+    async fn phase2(&mut self, svr: Option<Vec<i32>>) -> Result<()> {
+        let svr = if let Some(v) = svr {
+            v
+        } else {
+            (0..self.servers.len() as i32).collect()
+        };
+
+        // connect to server
+        let mut f = vec![];
+        for s in svr {
+            let addr = format!("http://{}", self.servers[s as usize].clone());
+            let dst = Endpoint::try_from(addr).unwrap();
+            let client = PaxosClient::connect(dst);
+            f.push(client);
+        }
+        let clients = join_all(f).await;
+
+        // send propose to server
+        let mut f = vec![];
+        for c in clients {
+            let mut client = c.unwrap();
+            let r = client.accept(self.proposer.clone()).await;
+            match r {
+                Ok(resp) => {
+                    let acc = resp.get_ref();
+                    f.push(acc.clone());
+                }
+                Err(_) => {}
+            }
+        }
+
+        // collected reply
+        let mut max_value = Acceptor {
+            round: Some(Default::default()),
+            last_round: Some(Default::default()),
+            value: None,
+        };
+        for acc in f {
+            if acc.clone().round.unwrap().number >= max_value.clone().round.clone().unwrap().number
+            {
+                max_value = acc;
+            }
+        }
+
+        self.proposer.value = max_value.value.clone();
+
+        Ok(())
     }
 }
 
@@ -174,7 +219,7 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn test_single_propose() {
+    async fn test_single_propose_single_server() {
         let (trigger, signal) = triggered::trigger();
         defer! {
             trigger.trigger();
@@ -276,9 +321,9 @@ mod test {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     pub(super) async fn test_phase1() {
         let mut server = TestServer::new(3);
-        server.start();
+        assert!(server.start().is_ok());
         defer! {
-            server.stop();
+            let _ = server.stop();
         }
         let servers = server_address(3);
         let client = Client::new(servers);
@@ -286,5 +331,23 @@ mod test {
         assert!(res.is_ok(), res.err().unwrap().to_string());
         let value = res.unwrap();
         assert!(value.is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    pub(super) async fn test_phase2() {
+        let mut server = TestServer::new(3);
+        assert!(server.start().is_ok());
+        defer! {
+            let _ = server.stop();
+        }
+        let servers = server_address(3);
+        let mut client = Client::new(servers);
+        let res = client.phase1(None).await;
+        assert!(res.is_ok(), res.err().unwrap().to_string());
+        let value = res.unwrap();
+        assert!(value.is_none());
+        let res = client.phase2(None).await;
+        assert!(res.is_ok());
+        assert!(client.proposer.value.is_none());
     }
 }
