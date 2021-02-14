@@ -542,6 +542,7 @@ dependencies = [
 name = "rpaxos"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "prost",
  "scopeguard",
  "tokio",
