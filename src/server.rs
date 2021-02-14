@@ -16,7 +16,6 @@ impl Paxos for PaxosService {
         let id = proposer.id.clone().unwrap();
         let key = id.key;
         let request_round = proposer.round.as_ref().unwrap();
-        let request_value = proposer.value.clone();
 
         // for lock storage
         {
@@ -25,12 +24,9 @@ impl Paxos for PaxosService {
                 let value = storage.get(&key).cloned().unwrap();
                 if request_round.number > value.round.as_ref().unwrap().number {
                     // 保存请求中的 round 到 last_round
-                    let new_value = Acceptor {
-                        round: Some(request_round.clone()),
-                        last_round: Some(request_round.clone()),
-                        value: request_value,
-                    };
-                    storage.insert(key, new_value);
+                    let mut new_acc = value.clone();
+                    new_acc.last_round = Some(request_round.clone());
+                    storage.insert(key, new_acc);
                 }
                 Ok(Response::new(value))
             } else {
