@@ -40,7 +40,7 @@ impl Client {
         let mut f = vec![];
         for s in svr {
             let addr = format!("http://{}", self.servers[s as usize].clone());
-            let dst = Endpoint::try_from(addr).unwrap();
+            let dst = Endpoint::try_from(addr)?;
             let client = PaxosClient::connect(dst);
             f.push(client);
         }
@@ -49,14 +49,16 @@ impl Client {
         // send propose to server
         let mut f = vec![];
         for c in clients {
-            let mut client = c.unwrap();
+            let mut client = c?;
             let r = client.prepare(self.proposer.clone()).await;
             match r {
                 Ok(resp) => {
                     let acc = resp.get_ref();
                     f.push(acc.clone());
                 }
-                Err(_) => {}
+                Err(e) => {
+                    return Err(Error::new(e));
+                }
             }
         }
 
@@ -318,7 +320,7 @@ mod test {
         );
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
     pub(super) async fn test_phase1() {
         let mut server = TestServer::new(3);
         assert!(server.start().is_ok());
@@ -333,7 +335,7 @@ mod test {
         assert!(value.is_none());
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
     pub(super) async fn test_phase2() {
         let mut server = TestServer::new(3);
         assert!(server.start().is_ok());
