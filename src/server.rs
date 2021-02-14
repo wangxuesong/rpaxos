@@ -73,53 +73,11 @@ impl Paxos for PaxosService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::paxos::paxos_server::PaxosServer;
     use crate::paxos::{PaxosInstanceId, RoundNum, Value};
-    use scopeguard::defer;
-    use std::thread::JoinHandle;
     use tokio_test::block_on;
-    use tonic::transport::Server;
-    use triggered::Listener;
-
-    #[tokio::main]
-    async fn serve(singal: Listener) -> Result<(), tonic::transport::Error> {
-        let addr = "[::1]:11030".parse().unwrap();
-
-        println!("PaxosServer listening on: {}", addr);
-
-        let service = PaxosService {
-            storage: Default::default(),
-        };
-
-        let svc = PaxosServer::new(service);
-
-        Server::builder()
-            .add_service(svc)
-            .serve_with_shutdown(addr, async {
-                singal.await;
-            })
-            .await?;
-
-        println!("PaxosServer exit");
-        Ok(())
-    }
-
-    fn start_server(signal: Listener) -> JoinHandle<()> {
-        let handler = std::thread::spawn(move || {
-            let _ = serve(signal);
-        });
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        handler
-    }
 
     #[test]
     fn test_prepare() {
-        let (trigger, signal) = triggered::trigger();
-        defer! {
-            trigger.trigger();
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        let _ = start_server(signal);
         let service = PaxosService {
             storage: Default::default(),
         };
