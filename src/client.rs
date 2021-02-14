@@ -1,5 +1,6 @@
-use crate::{PaxosClient, PaxosInstanceId, Proposer, Value};
-use anyhow::Result;
+use crate::{Acceptor, PaxosClient, PaxosInstanceId, Proposer, Value};
+use anyhow::{Error, Result};
+use futures::future::join_all;
 use std::convert::TryFrom;
 use tonic::transport::Endpoint;
 
@@ -29,17 +30,54 @@ impl Client {
     }
 
     async fn phase1(&self, svr: Option<Vec<i32>>) -> Result<Option<Value>> {
+        let mut svr = if let Some(v) = svr {
+            v
+        } else {
+            (0..self.servers.len() as i32).collect()
+        };
+
         // connect to server
-        let addr = format!("http://{}", self.servers[0].clone());
-        let dst = Endpoint::try_from(addr).unwrap();
-        let mut client = PaxosClient::connect(dst).await?;
+        let mut f = vec![];
+        for s in svr {
+            let addr = format!("http://{}", self.servers[0].clone());
+            let dst = Endpoint::try_from(addr).unwrap();
+            let mut client = PaxosClient::connect(dst);
+            f.push(client);
+        }
+        let clients = join_all(f).await;
 
         // send propose to server
-        let reply = client.prepare(self.proposer.clone()).await?;
+        let mut f = vec![];
+        for c in clients {
+            let mut client = (c.unwrap());
+            let r = client.prepare(self.proposer.clone()).await;
+            match r {
+                Ok(resp) => {
+                    let acc = resp.get_ref();
+                    f.push(acc.clone());
+                }
+                Err(_) => {}
+            }
+        }
 
         // collected reply
-        let acc = reply.get_ref();
-        let value = acc.value.clone();
+        let mut max_value = Acceptor {
+            round: Some(Default::default()),
+            last_round: Some(Default::default()),
+            value: None,
+        };
+        for acc in f {
+            if acc.clone().last_round.unwrap().number > self.proposer.round.clone().unwrap().number
+            {
+                return Err(Error::msg("last_round > round"));
+            }
+
+            if acc.clone().round.unwrap().number >= max_value.clone().round.clone().unwrap().number
+            {
+                max_value = acc;
+            }
+        }
+        let value = max_value.value.clone();
         Ok(value)
     }
 
