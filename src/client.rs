@@ -6,13 +6,15 @@ use tonic::transport::Endpoint;
 
 #[derive(Debug)]
 pub struct Client {
+    id: i64,
     servers: Vec<String>,
     proposer: Proposer,
 }
 
 impl Client {
-    pub fn new(servers: Vec<String>) -> Self {
+    pub fn new(servers: Vec<String>, id: i64) -> Self {
         Client {
+            id,
             servers,
             proposer: Proposer {
                 id: Some(PaxosInstanceId {
@@ -20,7 +22,7 @@ impl Client {
                     version: 0,
                 }),
                 round: Some(Default::default()),
-                value: Some(Value { value: 11 }),
+                value: None,
             },
         }
     }
@@ -341,7 +343,7 @@ mod test {
             let _ = server.stop();
         }
         let servers = server_address(3);
-        let client = Client::new(servers);
+        let client = Client::new(servers, 0);
         let res = client.phase1(None).await;
         assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
@@ -356,7 +358,7 @@ mod test {
             let _ = server.stop();
         }
         let servers = server_address(3);
-        let mut client = Client::new(servers);
+        let mut client = Client::new(servers, 0);
         let res = client.phase1(None).await;
         assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
@@ -374,8 +376,8 @@ mod test {
             let _ = server.stop();
         }
         let servers = server_address(3);
-        let mut alice = Client::new(servers.clone());
         let alice_id = 11i64;
+        let mut alice = Client::new(servers.clone(), alice_id);
         let mut rnd = 1i64;
         let prop = Proposer {
             id: Some(PaxosInstanceId {
@@ -409,8 +411,8 @@ mod test {
         assert!(res.is_ok());
         // assert!(alice.proposer.value.is_none());
 
-        let mut bob = Client::new(servers);
         let bob_id = 88i64;
+        let mut bob = Client::new(servers, bob_id);
         rnd += 1;
         let prop = Proposer {
             id: Some(PaxosInstanceId {
@@ -454,8 +456,8 @@ mod test {
         }
         let servers = server_address(3);
         // alice proposer round=1
-        let mut alice = Client::new(servers.clone());
         let alice_id = 11i64;
+        let mut alice = Client::new(servers.clone(), alice_id);
         let mut rnd = 1i64;
         let mut alice_prop = Proposer {
             id: Some(PaxosInstanceId {
@@ -475,8 +477,8 @@ mod test {
         assert!(value.is_none());
 
         // bob proposer round=2
-        let mut bob = Client::new(servers);
         let bob_id = 88i64;
+        let mut bob = Client::new(servers, bob_id);
         rnd += 1;
         let mut bob_prop = Proposer {
             id: Some(PaxosInstanceId {
@@ -518,8 +520,8 @@ mod test {
         }
         let servers = server_address(3);
         // alice proposer round=1
-        let mut alice = Client::new(servers.clone());
         let alice_id = 11i64;
+        let mut alice = Client::new(servers.clone(), alice_id);
         let mut rnd = 1i64;
         let mut alice_prop = Proposer {
             id: Some(PaxosInstanceId {
@@ -539,8 +541,8 @@ mod test {
         assert!(value.is_none());
 
         // bob proposer round=2
-        let mut bob = Client::new(servers);
         let bob_id = 88i64;
+        let mut bob = Client::new(servers, bob_id);
         rnd += 1;
         let mut bob_prop = Proposer {
             id: Some(PaxosInstanceId {
