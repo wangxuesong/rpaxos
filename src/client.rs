@@ -243,7 +243,7 @@ mod test {
         let _ = start_server(signal, "[::1]:11038".to_string());
 
         let res = PaxosClient::connect("http://[::1]:11038").await;
-        assert!(res.is_ok(), res.unwrap_err().to_string());
+        assert!(res.is_ok(), "{}", res.unwrap_err().to_string());
         let mut client = res.unwrap();
 
         // prepare
@@ -343,7 +343,7 @@ mod test {
         let servers = server_address(3);
         let client = Client::new(servers);
         let res = client.phase1(None).await;
-        assert!(res.is_ok(), res.err().unwrap().to_string());
+        assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
         assert!(value.is_none());
     }
@@ -358,7 +358,7 @@ mod test {
         let servers = server_address(3);
         let mut client = Client::new(servers);
         let res = client.phase1(None).await;
-        assert!(res.is_ok(), res.err().unwrap().to_string());
+        assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
         assert!(value.is_none());
         let res = client.phase2(None).await;
@@ -390,7 +390,7 @@ mod test {
         };
         alice.set_proposer(prop).unwrap();
         let res = alice.phase1(None).await;
-        assert!(res.is_ok(), res.err().unwrap().to_string());
+        assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
         assert!(value.is_none());
         let prop = Proposer {
@@ -425,7 +425,7 @@ mod test {
         };
         bob.set_proposer(prop).unwrap();
         let res = bob.phase1(None).await;
-        assert!(res.is_ok(), res.err().unwrap().to_string());
+        assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
         assert_eq!(value, Some(Value { value: 3 }));
         let prop = Proposer {
@@ -470,7 +470,7 @@ mod test {
         };
         alice.set_proposer(alice_prop.clone()).unwrap();
         let res = alice.phase1(None).await;
-        assert!(res.is_ok(), res.err().unwrap().to_string());
+        assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
         assert!(value.is_none());
 
@@ -491,7 +491,7 @@ mod test {
         };
         bob.set_proposer(bob_prop.clone()).unwrap();
         let res = bob.phase1(None).await;
-        assert!(res.is_ok(), res.err().unwrap().to_string());
+        assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
         assert!(value.is_none());
 
@@ -507,5 +507,93 @@ mod test {
         let res = bob.phase2(None).await;
         assert!(res.is_ok());
         assert_eq!(bob.proposer.value, Some(Value { value: 11 }));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+    pub(super) async fn test_double_client_partition_exception_scenes() {
+        let mut server = TestServer::new(3);
+        assert!(server.start().is_ok());
+        defer! {
+            let _ = server.stop();
+        }
+        let servers = server_address(3);
+        // alice proposer round=1
+        let mut alice = Client::new(servers.clone());
+        let alice_id = 11i64;
+        let mut rnd = 1i64;
+        let mut alice_prop = Proposer {
+            id: Some(PaxosInstanceId {
+                key: "sh".to_string(),
+                version: 0,
+            }),
+            round: Some(RoundNum {
+                number: rnd,
+                proposer_id: alice_id,
+            }),
+            value: None,
+        };
+        alice.set_proposer(alice_prop.clone()).unwrap();
+        let res = alice.phase1(Some(vec![0, 1])).await;
+        assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
+        let value = res.unwrap();
+        assert!(value.is_none());
+
+        // bob proposer round=2
+        let mut bob = Client::new(servers);
+        let bob_id = 88i64;
+        rnd += 1;
+        let mut bob_prop = Proposer {
+            id: Some(PaxosInstanceId {
+                key: "sh".to_string(),
+                version: 0,
+            }),
+            round: Some(RoundNum {
+                number: rnd,
+                proposer_id: bob_id,
+            }),
+            value: None,
+        };
+        bob.set_proposer(bob_prop.clone()).unwrap();
+        let res = bob.phase1(Some(vec![1, 2])).await;
+        assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
+        let value = res.unwrap();
+        assert!(value.is_none());
+
+        // alice proceed phase 2, failed;
+        alice_prop.value = Some(Value { value: 3 });
+        alice.set_proposer(alice_prop).unwrap();
+        let res = alice.phase2(Some(vec![0, 1])).await;
+        assert!(res.is_err());
+
+        // bob proceed phase 2, succeed;
+        bob_prop.value = Some(Value { value: 11 });
+        bob.set_proposer(bob_prop).unwrap();
+        let res = bob.phase2(Some(vec![1, 2])).await;
+        assert!(res.is_ok());
+        assert_eq!(bob.proposer.value, Some(Value { value: 11 }));
+
+        // alice propose with round=3
+        rnd += 1;
+        alice_prop = Proposer {
+            id: Some(PaxosInstanceId {
+                key: "sh".to_string(),
+                version: 0,
+            }),
+            round: Some(RoundNum {
+                number: rnd,
+                proposer_id: alice_id,
+            }),
+            value: None,
+        };
+        alice.set_proposer(alice_prop.clone()).unwrap();
+        let res = alice.phase1(Some(vec![0, 1])).await;
+        assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
+        let value = res.unwrap();
+        assert_eq!(value, Some(Value { value: 11 }));
+        // alice proceed phase 2, succeed;
+        alice_prop.value = Some(Value { value: 3 });
+        alice.set_proposer(alice_prop).unwrap();
+        let res = alice.phase2(Some(vec![0, 1])).await;
+        assert!(res.is_ok());
     }
 }
