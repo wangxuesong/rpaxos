@@ -27,8 +27,23 @@ impl Client {
         }
     }
 
-    pub fn run_round(&self, value: Option<Value>) -> Result<Option<Value>> {
-        unimplemented!();
+    pub async fn run_round(&mut self, value: Option<Value>) -> Result<Option<Value>> {
+        let mut propose = Proposer {
+            id: Some(PaxosInstanceId {
+                key: "key".to_string(),
+                version: 0,
+            }),
+            round: Some(Default::default()),
+            ..Default::default()
+        };
+
+        self.set_proposer(propose.clone())?;
+        let res = self.phase1(None).await?;
+
+        propose.value = value.clone();
+        self.set_proposer(propose)?;
+        self.phase2(None).await?;
+        Ok(value)
     }
 
     async fn phase1(&self, svr: Option<Vec<i32>>) -> Result<Option<Value>> {
@@ -596,6 +611,21 @@ mod test {
         alice_prop.value = Some(Value { value: 3 });
         alice.set_proposer(alice_prop).unwrap();
         let res = alice.phase2(Some(vec![0, 1])).await;
+        assert!(res.is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+    pub(super) async fn test_run_round() {
+        let mut server = TestServer::new(3);
+        assert!(server.start().is_ok());
+        defer! {
+            let _ = server.stop();
+        }
+        let servers = server_address(3);
+        // alice proposer round=1
+        let alice_id = 11i64;
+        let mut alice = Client::new(servers.clone(), alice_id);
+        let res = alice.run_round(Some(Value { value: 11 })).await;
         assert!(res.is_ok());
     }
 }
