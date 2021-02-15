@@ -137,6 +137,105 @@ mod tests {
     }
 
     #[test]
+    fn test_prepare_round() {
+        let service = PaxosService {
+            storage: Default::default(),
+        };
+        // rnd < last_rnd
+        {
+            let mut s = service.storage.lock().unwrap();
+            let acc = Acceptor {
+                round: Some(RoundNum {
+                    number: 2,
+                    proposer_id: 0,
+                }),
+                last_round: Some(RoundNum {
+                    number: 2,
+                    proposer_id: 0,
+                }),
+                value: Some(Value { value: 9 }),
+            };
+            s.insert("test".to_string(), acc);
+        }
+        let r0 = Request::new(Proposer {
+            id: Some(PaxosInstanceId {
+                key: "test".to_string(),
+                version: 0,
+            }),
+            round: Some(RoundNum {
+                number: 1,
+                proposer_id: 0,
+            }),
+            value: None,
+        });
+        let result = service.prepare(r0);
+        let r = block_on(result);
+        assert!(r.is_ok());
+        let resp = r.unwrap();
+        let acc = resp.get_ref();
+        assert_eq!(
+            &Acceptor {
+                round: Some(RoundNum {
+                    number: 2,
+                    proposer_id: 0
+                }),
+                last_round: Some(RoundNum {
+                    number: 2,
+                    proposer_id: 0,
+                }),
+                value: Some(Value { value: 9 }),
+            },
+            acc
+        );
+
+        // rnd = last_rnd && rnd > vrnd
+        {
+            let mut s = service.storage.lock().unwrap();
+            let acc = Acceptor {
+                round: Some(RoundNum {
+                    number: 1,
+                    proposer_id: 0,
+                }),
+                last_round: Some(RoundNum {
+                    number: 2,
+                    proposer_id: 0,
+                }),
+                value: Some(Value { value: 9 }),
+            };
+            s.insert("test".to_string(), acc);
+        }
+        let r1 = Request::new(Proposer {
+            id: Some(PaxosInstanceId {
+                key: "test".to_string(),
+                version: 0,
+            }),
+            round: Some(RoundNum {
+                number: 2,
+                proposer_id: 0,
+            }),
+            value: None,
+        });
+        let r = block_on(service.prepare(r1));
+        assert!(r.is_ok());
+        let resp = r.unwrap();
+        let acc = resp.get_ref();
+        assert_eq!(
+            acc,
+            &Acceptor {
+                round: Some(RoundNum {
+                    number: 1,
+                    proposer_id: 0,
+                }),
+                last_round: Some(RoundNum {
+                    number: 2,
+                    proposer_id: 0,
+                }),
+                value: Some(Value { value: 9 }),
+            }
+        );
+    }
+
+    #[test]
     fn test_accept() {
         let service = PaxosService {
             storage: Default::default(),
