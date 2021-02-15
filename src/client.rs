@@ -38,7 +38,7 @@ impl Client {
         };
 
         self.set_proposer(propose.clone())?;
-        let res = self.phase1(None).await?;
+        let _ = self.phase1(None).await?;
 
         propose.value = value.clone();
         self.set_proposer(propose)?;
@@ -86,13 +86,18 @@ impl Client {
             value: None,
         };
         for acc in f {
-            if acc.clone().last_round.unwrap().number > self.proposer.round.clone().unwrap().number
-            {
+            let last_round = acc.clone().last_round.unwrap().number;
+            let round = self.proposer.round.clone().unwrap().number;
+            if last_round > round {
                 return Err(Error::msg("last_round > round"));
             }
 
-            if acc.clone().round.unwrap().number >= max_value.clone().round.clone().unwrap().number
-            {
+            let value_round = acc.clone().round.unwrap().number;
+            if round == last_round && round > value_round {
+                return Err(Error::msg("round > value_round"));
+            }
+
+            if value_round >= max_value.clone().round.clone().unwrap().number {
                 max_value = acc;
             }
         }
@@ -358,11 +363,93 @@ mod test {
             let _ = server.stop();
         }
         let servers = server_address(3);
-        let client = Client::new(servers, 0);
+        let mut client = Client::new(servers, 0);
+
+        // round > value_round
+        let mut rnd = 5i64;
+        let prop = Proposer {
+            id: Some(PaxosInstanceId {
+                key: "sh".to_string(),
+                version: 0,
+            }),
+            round: Some(RoundNum {
+                number: rnd,
+                proposer_id: 0,
+            }),
+            value: None,
+        };
+        client.set_proposer(prop.clone()).unwrap();
         let res = client.phase1(None).await;
         assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
         assert!(value.is_none());
+        {
+            let mut p = prop.clone();
+            p.value = Some(Value { value: 11 });
+            client.set_proposer(p).unwrap();
+            assert!(client.phase2(None).await.is_ok());
+        }
+        // round = 5 && value = 11
+
+        // round = value_round
+        let mut prop = prop.clone();
+        prop.round = Some(RoundNum {
+            number: rnd,
+            proposer_id: 0,
+        });
+        client.set_proposer(prop.clone()).unwrap();
+        let res = client.phase1(None).await;
+        assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
+        let value = res.unwrap();
+        assert_eq!(value, Some(Value { value: 11 }));
+        {
+            let mut p = prop.clone();
+            p.value = Some(Value { value: 03 });
+            client.set_proposer(p).unwrap();
+            assert!(client.phase2(None).await.is_ok());
+        }
+        // round = 5 && value = 11
+
+        // round < last_round
+        let mut prop = prop.clone();
+        rnd = 3;
+        prop.round = Some(RoundNum {
+            number: rnd,
+            proposer_id: 0,
+        });
+        client.set_proposer(prop.clone()).unwrap();
+        let res = client.phase1(None).await;
+        assert!(res.is_err());
+        {
+            let mut p = prop.clone();
+            p.value = Some(Value { value: 04 });
+            client.set_proposer(p).unwrap();
+            let res = client.phase2(None).await;
+            assert!(res.is_err(), "{}", res.err().unwrap().to_string());
+        }
+        // round = 5 && value = 11
+
+        // round = last_round && round > value_round
+        let mut prop = prop.clone();
+        rnd = 6;
+        prop.round = Some(RoundNum {
+            number: rnd,
+            proposer_id: 0,
+        });
+        client.set_proposer(prop.clone()).unwrap();
+        let res = client.phase1(None).await;
+        assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
+        let value = res.unwrap();
+        assert_eq!(value, Some(Value { value: 11 }));
+        // last_round = 6 && value_round = 5
+        {
+            let mut p = prop.clone();
+            p.value = Some(Value { value: 05 });
+            // round = 6
+            client.set_proposer(p).unwrap();
+            let res = client.phase1(None).await;
+            assert!(res.is_err());
+        }
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 5)]

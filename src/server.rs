@@ -54,7 +54,9 @@ impl Paxos for PaxosService {
         {
             let mut storage = self.storage.lock().unwrap();
             let acc = storage.get(&key).cloned().unwrap();
-            if request_round.number >= acc.last_round.clone().unwrap().number {
+            let last_round = acc.last_round.clone().unwrap().number;
+            let value_round = acc.round.clone().unwrap().number;
+            if request_round.number == last_round && last_round > value_round {
                 let mut new_value = acc.clone();
                 new_value.round = Some(request_round.clone());
                 new_value.value = request_value;
