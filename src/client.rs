@@ -502,7 +502,7 @@ mod test {
             let mut p = prop.clone();
             p.value = Some(Value { value: 11 });
             client.set_proposer(p).unwrap();
-            assert!(client.phase2(None).await.is_ok());
+            assert!(phase2(&mut client).await.is_ok());
         }
         // round = 5 && value = 11
 
@@ -521,7 +521,7 @@ mod test {
             let mut p = prop.clone();
             p.value = Some(Value { value: 03 });
             client.set_proposer(p).unwrap();
-            assert!(client.phase2(None).await.is_ok());
+            assert!(phase2(&mut client).await.is_ok());
         }
         // round = 5 && value = 11
 
@@ -539,7 +539,7 @@ mod test {
             let mut p = prop.clone();
             p.value = Some(Value { value: 04 });
             client.set_proposer(p).unwrap();
-            let res = client.phase2(None).await;
+            let res = phase2(&mut client).await;
             assert!(res.is_err(), "{}", res.err().unwrap().to_string());
         }
         // round = 5 && value = 11
@@ -575,6 +575,14 @@ mod test {
             .await
     }
 
+    async fn phase2(client: &mut Client) -> Result<()> {
+        // client.propose.set_context(client.acceptors.clone())?;
+        client
+            .propose
+            .phase2_with_client(client.acceptors.clone())
+            .await
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
     pub(super) async fn test_phase2() {
         let mut server = TestServer::new(3);
@@ -589,7 +597,7 @@ mod test {
         assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
         assert!(value.is_none());
-        let res = client.phase2(None).await;
+        let res = phase2(&mut client).await;
         assert!(res.is_ok());
         // assert!(client.proposer.value.is_none());
     }
@@ -633,7 +641,7 @@ mod test {
             value: Some(Value { value: 3 }),
         };
         alice.set_proposer(prop).unwrap();
-        let res = alice.phase2(None).await;
+        let res = phase2(&mut alice).await;
         assert!(res.is_ok());
         // assert!(alice.proposer.value.is_none());
 
@@ -668,7 +676,7 @@ mod test {
             value: Some(Value { value: 4 }),
         };
         bob.set_proposer(prop).unwrap();
-        let res = bob.phase2(None).await;
+        let res = phase2(&mut bob).await;
         assert!(res.is_ok());
         // assert_eq!(bob.proposer.value, Some(Value { value: 3 }));
     }
@@ -728,13 +736,13 @@ mod test {
         // alice proceed phase 2, failed;
         alice_prop.value = Some(Value { value: 3 });
         alice.set_proposer(alice_prop).unwrap();
-        let res = alice.phase2(None).await;
+        let res = phase2(&mut alice).await;
         assert!(res.is_err());
 
         // bob proceed phase 2, succeed;
         bob_prop.value = Some(Value { value: 11 });
         bob.set_proposer(bob_prop).unwrap();
-        let res = bob.phase2(None).await;
+        let res = phase2(&mut bob).await;
         assert!(res.is_ok());
         assert_eq!(bob.proposer().value, Some(Value { value: 11 }));
     }
