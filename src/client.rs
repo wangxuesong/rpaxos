@@ -2,7 +2,7 @@ use crate::{Acceptor, PaxosClient, PaxosInstanceId, Proposer, RoundNum, Value};
 use anyhow::{Error, Result};
 use futures::future::join_all;
 use std::convert::TryFrom;
-use tonic::transport::Endpoint;
+use tonic::transport::{Channel, Endpoint};
 
 #[derive(Debug, Clone, Default)]
 pub struct Propose {
@@ -11,19 +11,16 @@ pub struct Propose {
 }
 
 impl Propose {
-    pub fn new(servers: Vec<String>, id: i64) -> Self {
+    pub fn new(servers: Vec<String>, key: String, value: Option<Value>, id: i64) -> Self {
         Propose {
             servers,
             proposer: Proposer {
-                id: Some(PaxosInstanceId {
-                    key: "key".to_string(),
-                    version: 0,
-                }),
+                id: Some(PaxosInstanceId { key, version: 0 }),
                 round: Some(RoundNum {
                     number: 0,
                     proposer_id: id,
                 }),
-                value: None,
+                value: value,
             },
             ..Default::default()
         }
@@ -46,6 +43,13 @@ impl Propose {
         }
         let clients = join_all(f).await;
 
+        self.phase1_with_client(clients).await
+    }
+
+    async fn phase1_with_client(
+        &mut self,
+        clients: Vec<Result<PaxosClient<Channel>, tonic::transport::Error>>,
+    ) -> Result<Option<Value>, Error> {
         // send propose to server
         let mut f = vec![];
         for c in clients {
@@ -115,6 +119,13 @@ impl Propose {
         }
         let clients = join_all(f).await;
 
+        self.phase2_with_client(clients).await
+    }
+
+    async fn phase2_with_client(
+        &mut self,
+        clients: Vec<Result<PaxosClient<Channel>, tonic::transport::Error>>,
+    ) -> Result<(), Error> {
         // send propose to server
         let mut f = vec![];
         for c in clients {
@@ -154,6 +165,17 @@ impl Propose {
         self.proposer = proposer;
         Ok(())
     }
+
+    pub async fn run(&mut self) -> Result<Option<Value>> {
+        let v = self.phase1(None).await?;
+        self.proposer.value = if let Some(_) = v.clone() {
+            v // 修复
+        } else {
+            self.proposer.value.clone() // 更新
+        };
+        self.phase2(None).await?;
+        Ok(self.proposer.value.clone())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -167,33 +189,15 @@ impl Client {
     pub fn new(servers: Vec<String>, id: i64) -> Self {
         Client {
             id,
-            propose: Propose::new(servers.clone(), id),
+            propose: Propose::new(servers.clone(), "key".to_string(), None, id),
             servers,
             ..Default::default()
         }
     }
 
-    pub async fn run_round(&mut self, value: Option<Value>) -> Result<Option<Value>> {
-        let mut propose = Proposer {
-            id: Some(PaxosInstanceId {
-                key: "key".to_string(),
-                version: 0,
-            }),
-            round: Some(Default::default()),
-            ..Default::default()
-        };
-
-        self.set_proposer(propose.clone())?;
-        let v = self.phase1(None).await?;
-
-        propose.value = if let Some(_) = v.clone() {
-            v // 修复
-        } else {
-            value.clone() // 更新
-        };
-        self.set_proposer(propose)?;
-        self.phase2(None).await?;
-        Ok(value)
+    pub async fn run_propose(&mut self, key: String, value: Option<Value>) -> Result<Option<Value>> {
+        let mut prop = Propose::new(self.servers.clone(), key, value.clone(), self.id);
+        return prop.run().await;
     }
 
     async fn phase1(&mut self, svr: Option<Vec<i32>>) -> Result<Option<Value>> {
@@ -209,8 +213,7 @@ impl Client {
     }
 
     fn proposer(&mut self) -> Proposer {
-        let p = self.propose.proposer.clone();
-        p
+        self.propose.proposer.clone()
     }
 }
 
@@ -753,7 +756,7 @@ mod test {
         // alice proposer round=1
         let alice_id = 11i64;
         let mut alice = Client::new(servers.clone(), alice_id);
-        let res = alice.run_round(Some(Value { value: 11 })).await;
+        let res = alice.run_propose("sh".to_string(), Some(Value { value: 11 })).await;
         assert!(res.is_ok());
     }
 }
