@@ -4,7 +4,7 @@ use futures::future::join_all;
 use std::convert::TryFrom;
 use tonic::transport::Endpoint;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Client {
     id: i64,
     servers: Vec<String>,
@@ -24,6 +24,7 @@ impl Client {
                 round: Some(Default::default()),
                 value: None,
             },
+            ..Default::default()
         }
     }
 
@@ -38,15 +39,19 @@ impl Client {
         };
 
         self.set_proposer(propose.clone())?;
-        let _ = self.phase1(None).await?;
+        let v = self.phase1(None).await?;
 
-        propose.value = value.clone();
+        propose.value = if let Some(_) = v.clone() {
+            v // 修复
+        } else {
+            value.clone() // 更新
+        };
         self.set_proposer(propose)?;
         self.phase2(None).await?;
         Ok(value)
     }
 
-    async fn phase1(&self, svr: Option<Vec<i32>>) -> Result<Option<Value>> {
+    async fn phase1(&mut self, svr: Option<Vec<i32>>) -> Result<Option<Value>> {
         let svr = if let Some(v) = svr {
             v
         } else {
@@ -85,10 +90,10 @@ impl Client {
             last_round: Some(Default::default()),
             value: None,
         };
+        let round = self.proposer.round.clone().unwrap().number;
         for acc in f {
             let last_round = acc.clone().last_round.unwrap().number;
-            let round = self.proposer.round.clone().unwrap().number;
-            if last_round > round {
+            if round < last_round {
                 return Err(Error::msg("last_round > round"));
             }
 
@@ -97,11 +102,21 @@ impl Client {
                 return Err(Error::msg("round > value_round"));
             }
 
-            if value_round >= max_value.clone().round.clone().unwrap().number {
+            if last_round >= max_value.clone().last_round.clone().unwrap().number {
                 max_value = acc;
             }
         }
-        let value = max_value.value.clone();
+        // round = value_round 修复
+        let last_round = max_value.clone().last_round.unwrap().number;
+        let value_round = max_value.clone().round.unwrap().number;
+        if round == last_round && round == value_round {
+            self.proposer.value = max_value.clone().value;
+        }
+        // round > last_round 更新
+        if round > last_round {
+            self.proposer.value = None;
+        }
+        let value = self.proposer.value.clone();
         Ok(value)
     }
 
@@ -139,11 +154,6 @@ impl Client {
         }
 
         // collected reply
-        let max_value = Acceptor {
-            round: Some(Default::default()),
-            last_round: Some(Default::default()),
-            value: None,
-        };
         let rnd = self.proposer.clone().round.clone().unwrap().number;
         let quorum = self.servers.len() / 2 + 1;
         let mut count = 0usize;
@@ -440,7 +450,7 @@ mod test {
         let res = client.phase1(None).await;
         assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
-        assert_eq!(value, Some(Value { value: 11 }));
+        assert_eq!(value, None);
         // last_round = 6 && value_round = 5
         {
             let mut p = prop.clone();
@@ -480,14 +490,13 @@ mod test {
         let servers = server_address(3);
         let alice_id = 11i64;
         let mut alice = Client::new(servers.clone(), alice_id);
-        let mut rnd = 1i64;
         let prop = Proposer {
             id: Some(PaxosInstanceId {
                 key: "sh".to_string(),
                 version: 0,
             }),
             round: Some(RoundNum {
-                number: rnd,
+                number: 1,
                 proposer_id: alice_id,
             }),
             value: None,
@@ -503,7 +512,7 @@ mod test {
                 version: 0,
             }),
             round: Some(RoundNum {
-                number: rnd,
+                number: 1,
                 proposer_id: alice_id,
             }),
             value: Some(Value { value: 3 }),
@@ -515,14 +524,13 @@ mod test {
 
         let bob_id = 88i64;
         let mut bob = Client::new(servers, bob_id);
-        rnd += 1;
         let prop = Proposer {
             id: Some(PaxosInstanceId {
                 key: "sh".to_string(),
                 version: 0,
             }),
             round: Some(RoundNum {
-                number: rnd,
+                number: 2,
                 proposer_id: bob_id,
             }),
             value: None,
@@ -531,14 +539,14 @@ mod test {
         let res = bob.phase1(None).await;
         assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
-        assert_eq!(value, Some(Value { value: 3 }));
+        assert_eq!(value, None);
         let prop = Proposer {
             id: Some(PaxosInstanceId {
                 key: "sh".to_string(),
                 version: 0,
             }),
             round: Some(RoundNum {
-                number: rnd,
+                number: 2,
                 proposer_id: bob_id,
             }),
             value: Some(Value { value: 4 }),
@@ -624,14 +632,13 @@ mod test {
         // alice proposer round=1
         let alice_id = 11i64;
         let mut alice = Client::new(servers.clone(), alice_id);
-        let mut rnd = 1i64;
         let mut alice_prop = Proposer {
             id: Some(PaxosInstanceId {
                 key: "sh".to_string(),
                 version: 0,
             }),
             round: Some(RoundNum {
-                number: rnd,
+                number: 1,
                 proposer_id: alice_id,
             }),
             value: None,
@@ -645,14 +652,13 @@ mod test {
         // bob proposer round=2
         let bob_id = 88i64;
         let mut bob = Client::new(servers, bob_id);
-        rnd += 1;
         let mut bob_prop = Proposer {
             id: Some(PaxosInstanceId {
                 key: "sh".to_string(),
                 version: 0,
             }),
             round: Some(RoundNum {
-                number: rnd,
+                number: 2,
                 proposer_id: bob_id,
             }),
             value: None,
@@ -677,14 +683,13 @@ mod test {
         assert_eq!(bob.proposer.value, Some(Value { value: 11 }));
 
         // alice propose with round=3
-        rnd += 1;
         alice_prop = Proposer {
             id: Some(PaxosInstanceId {
                 key: "sh".to_string(),
                 version: 0,
             }),
             round: Some(RoundNum {
-                number: rnd,
+                number: 3,
                 proposer_id: alice_id,
             }),
             value: None,
@@ -693,7 +698,7 @@ mod test {
         let res = alice.phase1(Some(vec![0, 1])).await;
         assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
-        assert_eq!(value, Some(Value { value: 11 }));
+        assert_eq!(value, None);
         // alice proceed phase 2, succeed;
         alice_prop.value = Some(Value { value: 3 });
         alice.set_proposer(alice_prop).unwrap();
