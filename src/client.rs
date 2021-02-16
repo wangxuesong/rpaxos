@@ -8,6 +8,7 @@ use tonic::transport::{Channel, Endpoint};
 pub struct Propose {
     proposer: Proposer,
     servers: Vec<String>,
+    context: Vec<PaxosClient<Channel>>,
 }
 
 impl Propose {
@@ -42,18 +43,25 @@ impl Propose {
             f.push(client);
         }
         let clients = join_all(f).await;
+        let mut acc = vec![];
+        for res in clients {
+            match res {
+                Ok(c) => acc.push(c),
+                Err(_) => {}
+            }
+        }
 
-        self.phase1_with_client(clients).await
+        self.phase1_with_client(acc).await
     }
 
     async fn phase1_with_client(
         &mut self,
-        clients: Vec<Result<PaxosClient<Channel>, tonic::transport::Error>>,
+        clients: Vec<PaxosClient<Channel>>,
     ) -> Result<Option<Value>, Error> {
         // send propose to server
         let mut f = vec![];
         for c in clients {
-            let mut client = c?;
+            let mut client = c;
             let r = client.prepare(self.proposer.clone()).await;
             match r {
                 Ok(resp) => {
@@ -118,18 +126,25 @@ impl Propose {
             f.push(client);
         }
         let clients = join_all(f).await;
+        let mut acc = vec![];
+        for res in clients {
+            match res {
+                Ok(c) => acc.push(c),
+                Err(_) => {}
+            }
+        }
 
-        self.phase2_with_client(clients).await
+        self.phase2_with_client(acc).await
     }
 
     async fn phase2_with_client(
         &mut self,
-        clients: Vec<Result<PaxosClient<Channel>, tonic::transport::Error>>,
+        clients: Vec<PaxosClient<Channel>>,
     ) -> Result<(), Error> {
         // send propose to server
         let mut f = vec![];
         for c in clients {
-            let mut client = c?;
+            let mut client = c;
             let r = client.accept(self.proposer.clone()).await;
             match r {
                 Ok(resp) => {
@@ -167,14 +182,20 @@ impl Propose {
     }
 
     pub async fn run(&mut self) -> Result<Option<Value>> {
-        let v = self.phase1(None).await?;
+        let v = self.phase1_with_client(self.context.clone()).await?;
         self.proposer.value = if let Some(_) = v.clone() {
             v // 修复
         } else {
             self.proposer.value.clone() // 更新
         };
-        self.phase2(None).await?;
+        self.phase2_with_client(self.context.clone()).await?;
         Ok(self.proposer.value.clone())
+    }
+
+    /// 临时函数，设置连接 [`Acceptor`] 的 [`PaxosClient`]
+    pub fn set_context(&mut self, context: Vec<PaxosClient<Channel>>) -> Result<()> {
+        self.context = context;
+        Ok(())
     }
 }
 
@@ -182,6 +203,7 @@ impl Propose {
 pub struct Client {
     id: i64,
     servers: Vec<String>,
+    acceptors: Vec<PaxosClient<Channel>>,
     propose: Propose,
 }
 
@@ -195,8 +217,41 @@ impl Client {
         }
     }
 
-    pub async fn run_propose(&mut self, key: String, value: Option<Value>) -> Result<Option<Value>> {
+    pub async fn connection(&mut self) -> Result<()> {
+        // connect to server
+        let mut f = vec![];
+        for s in self.servers.clone() {
+            let addr = format!("http://{}", s.clone());
+            let dst = Endpoint::try_from(addr).unwrap();
+            let client = PaxosClient::connect(dst);
+            f.push(client);
+        }
+        let results = join_all(f).await;
+        let quorum = self.servers.len() / 2 + 1;
+        let mut acceptors = vec![];
+        for acc in results {
+            match acc {
+                Ok(c) => {
+                    acceptors.push(c);
+                }
+                Err(_) => {}
+            }
+        }
+        self.acceptors = acceptors.clone();
+        if acceptors.len() >= quorum {
+            Ok(())
+        } else {
+            Err(Error::msg("not enough quorum"))
+        }
+    }
+
+    pub async fn run_propose(
+        &mut self,
+        key: String,
+        value: Option<Value>,
+    ) -> Result<Option<Value>> {
         let mut prop = Propose::new(self.servers.clone(), key, value.clone(), self.id);
+        prop.set_context(self.acceptors.clone())?;
         return prop.run().await;
     }
 
@@ -756,7 +811,10 @@ mod test {
         // alice proposer round=1
         let alice_id = 11i64;
         let mut alice = Client::new(servers.clone(), alice_id);
-        let res = alice.run_propose("sh".to_string(), Some(Value { value: 11 })).await;
+        assert!(alice.connection().await.is_ok());
+        let res = alice
+            .run_propose("sh".to_string(), Some(Value { value: 11 }))
+            .await;
         assert!(res.is_ok());
     }
 }
