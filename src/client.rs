@@ -58,6 +58,10 @@ impl Propose {
         &mut self,
         clients: Vec<PaxosClient<Channel>>,
     ) -> Result<Option<Value>, Error> {
+        if self.context.len() == 0 {
+            return Err(Error::msg("not enough quorum"));
+        }
+
         // send propose to server
         let mut f = vec![];
         for c in clients {
@@ -176,6 +180,7 @@ impl Propose {
         Err(Error::msg("not enough quorum"))
     }
 
+    #[cfg(test)]
     fn set_proposer(&mut self, proposer: Proposer) -> Result<()> {
         self.proposer = proposer;
         Ok(())
@@ -217,7 +222,7 @@ impl Client {
         }
     }
 
-    pub async fn connection(&mut self) -> Result<()> {
+    pub async fn connect(&mut self) -> Result<()> {
         // connect to server
         let mut f = vec![];
         for s in self.servers.clone() {
@@ -255,18 +260,22 @@ impl Client {
         return prop.run().await;
     }
 
+    #[cfg(test)]
     async fn phase1(&mut self, svr: Option<Vec<i32>>) -> Result<Option<Value>> {
         return self.propose.phase1(svr).await;
     }
 
+    #[cfg(test)]
     async fn phase2(&mut self, svr: Option<Vec<i32>>) -> Result<()> {
         return self.propose.phase2(svr).await;
     }
 
+    #[cfg(test)]
     fn set_proposer(&mut self, proposer: Proposer) -> Result<()> {
         self.propose.set_proposer(proposer)
     }
 
+    #[cfg(test)]
     fn proposer(&mut self) -> Proposer {
         self.propose.proposer.clone()
     }
@@ -274,8 +283,9 @@ impl Client {
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    // use super::*;
     use crate::*;
+    use anyhow::Result;
     use scopeguard::defer;
     use std::thread::JoinHandle;
     use tonic::transport::Server;
@@ -468,6 +478,7 @@ mod test {
         }
         let servers = server_address(3);
         let mut client = Client::new(servers, 0);
+        assert!(client.connect().await.is_ok());
 
         // round > value_round
         let mut rnd = 5i64;
@@ -483,7 +494,7 @@ mod test {
             value: None,
         };
         client.set_proposer(prop.clone()).unwrap();
-        let res = client.phase1(None).await;
+        let res = phase1(&mut client).await;
         assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
         assert!(value.is_none());
@@ -502,7 +513,7 @@ mod test {
             proposer_id: 0,
         });
         client.set_proposer(prop.clone()).unwrap();
-        let res = client.phase1(None).await;
+        let res = phase1(&mut client).await;
         assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
         assert_eq!(value, Some(Value { value: 11 }));
@@ -522,7 +533,7 @@ mod test {
             proposer_id: 0,
         });
         client.set_proposer(prop.clone()).unwrap();
-        let res = client.phase1(None).await;
+        let res = phase1(&mut client).await;
         assert!(res.is_err());
         {
             let mut p = prop.clone();
@@ -541,7 +552,7 @@ mod test {
             proposer_id: 0,
         });
         client.set_proposer(prop.clone()).unwrap();
-        let res = client.phase1(None).await;
+        let res = phase1(&mut client).await;
         assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
         assert_eq!(value, None);
@@ -551,9 +562,17 @@ mod test {
             p.value = Some(Value { value: 05 });
             // round = 6
             client.set_proposer(p).unwrap();
-            let res = client.phase1(None).await;
+            let res = phase1(&mut client).await;
             assert!(res.is_err());
         }
+    }
+
+    async fn phase1(client: &mut Client) -> Result<Option<Value>> {
+        client.propose.set_context(client.acceptors.clone())?;
+        client
+            .propose
+            .phase1_with_client(client.acceptors.clone())
+            .await
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 5)]
@@ -565,7 +584,8 @@ mod test {
         }
         let servers = server_address(3);
         let mut client = Client::new(servers, 0);
-        let res = client.phase1(None).await;
+        assert!(client.connect().await.is_ok());
+        let res = phase1(&mut client).await;
         assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
         assert!(value.is_none());
@@ -584,6 +604,7 @@ mod test {
         let servers = server_address(3);
         let alice_id = 11i64;
         let mut alice = Client::new(servers.clone(), alice_id);
+        assert!(alice.connect().await.is_ok());
         let prop = Proposer {
             id: Some(PaxosInstanceId {
                 key: "sh".to_string(),
@@ -596,7 +617,7 @@ mod test {
             value: None,
         };
         alice.set_proposer(prop).unwrap();
-        let res = alice.phase1(None).await;
+        let res = phase1(&mut alice).await;
         assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
         assert!(value.is_none());
@@ -618,6 +639,7 @@ mod test {
 
         let bob_id = 88i64;
         let mut bob = Client::new(servers, bob_id);
+        assert!(bob.connect().await.is_ok());
         let prop = Proposer {
             id: Some(PaxosInstanceId {
                 key: "sh".to_string(),
@@ -630,7 +652,7 @@ mod test {
             value: None,
         };
         bob.set_proposer(prop).unwrap();
-        let res = bob.phase1(None).await;
+        let res = phase1(&mut bob).await;
         assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
         assert_eq!(value, None);
@@ -662,6 +684,7 @@ mod test {
         // alice proposer round=1
         let alice_id = 11i64;
         let mut alice = Client::new(servers.clone(), alice_id);
+        assert!(alice.connect().await.is_ok());
         let mut rnd = 1i64;
         let mut alice_prop = Proposer {
             id: Some(PaxosInstanceId {
@@ -675,7 +698,7 @@ mod test {
             value: None,
         };
         alice.set_proposer(alice_prop.clone()).unwrap();
-        let res = alice.phase1(None).await;
+        let res = phase1(&mut alice).await;
         assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
         assert!(value.is_none());
@@ -683,6 +706,7 @@ mod test {
         // bob proposer round=2
         let bob_id = 88i64;
         let mut bob = Client::new(servers, bob_id);
+        assert!(bob.connect().await.is_ok());
         rnd += 1;
         let mut bob_prop = Proposer {
             id: Some(PaxosInstanceId {
@@ -696,7 +720,7 @@ mod test {
             value: None,
         };
         bob.set_proposer(bob_prop.clone()).unwrap();
-        let res = bob.phase1(None).await;
+        let res = phase1(&mut bob).await;
         assert!(res.is_ok(), "{}", res.err().unwrap().to_string());
         let value = res.unwrap();
         assert!(value.is_none());
@@ -726,6 +750,8 @@ mod test {
         // alice proposer round=1
         let alice_id = 11i64;
         let mut alice = Client::new(servers.clone(), alice_id);
+        assert!(alice.connect().await.is_ok());
+        assert!(alice.propose.set_context(alice.acceptors.clone()).is_ok());
         let mut alice_prop = Proposer {
             id: Some(PaxosInstanceId {
                 key: "sh".to_string(),
@@ -746,6 +772,8 @@ mod test {
         // bob proposer round=2
         let bob_id = 88i64;
         let mut bob = Client::new(servers, bob_id);
+        assert!(bob.connect().await.is_ok());
+        assert!(bob.propose.set_context(bob.acceptors.clone()).is_ok());
         let mut bob_prop = Proposer {
             id: Some(PaxosInstanceId {
                 key: "sh".to_string(),
@@ -811,7 +839,7 @@ mod test {
         // alice proposer round=1
         let alice_id = 11i64;
         let mut alice = Client::new(servers.clone(), alice_id);
-        assert!(alice.connection().await.is_ok());
+        assert!(alice.connect().await.is_ok());
         let res = alice
             .run_propose("sh".to_string(), Some(Value { value: 11 }))
             .await;
