@@ -1,54 +1,32 @@
-use crate::{Acceptor, PaxosClient, PaxosInstanceId, Proposer, Value};
+use crate::{Acceptor, PaxosClient, PaxosInstanceId, Proposer, RoundNum, Value};
 use anyhow::{Error, Result};
 use futures::future::join_all;
 use std::convert::TryFrom;
 use tonic::transport::Endpoint;
 
-#[derive(Debug, Default)]
-pub struct Client {
-    id: i64,
-    servers: Vec<String>,
+#[derive(Debug, Clone, Default)]
+pub struct Propose {
     proposer: Proposer,
+    servers: Vec<String>,
 }
 
-impl Client {
+impl Propose {
     pub fn new(servers: Vec<String>, id: i64) -> Self {
-        Client {
-            id,
+        Propose {
             servers,
             proposer: Proposer {
                 id: Some(PaxosInstanceId {
-                    key: "sh".to_string(),
+                    key: "key".to_string(),
                     version: 0,
                 }),
-                round: Some(Default::default()),
+                round: Some(RoundNum {
+                    number: 0,
+                    proposer_id: id,
+                }),
                 value: None,
             },
             ..Default::default()
         }
-    }
-
-    pub async fn run_round(&mut self, value: Option<Value>) -> Result<Option<Value>> {
-        let mut propose = Proposer {
-            id: Some(PaxosInstanceId {
-                key: "key".to_string(),
-                version: 0,
-            }),
-            round: Some(Default::default()),
-            ..Default::default()
-        };
-
-        self.set_proposer(propose.clone())?;
-        let v = self.phase1(None).await?;
-
-        propose.value = if let Some(_) = v.clone() {
-            v // 修复
-        } else {
-            value.clone() // 更新
-        };
-        self.set_proposer(propose)?;
-        self.phase2(None).await?;
-        Ok(value)
     }
 
     async fn phase1(&mut self, svr: Option<Vec<i32>>) -> Result<Option<Value>> {
@@ -175,6 +153,64 @@ impl Client {
     fn set_proposer(&mut self, proposer: Proposer) -> Result<()> {
         self.proposer = proposer;
         Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct Client {
+    id: i64,
+    servers: Vec<String>,
+    propose: Propose,
+}
+
+impl Client {
+    pub fn new(servers: Vec<String>, id: i64) -> Self {
+        Client {
+            id,
+            propose: Propose::new(servers.clone(), id),
+            servers,
+            ..Default::default()
+        }
+    }
+
+    pub async fn run_round(&mut self, value: Option<Value>) -> Result<Option<Value>> {
+        let mut propose = Proposer {
+            id: Some(PaxosInstanceId {
+                key: "key".to_string(),
+                version: 0,
+            }),
+            round: Some(Default::default()),
+            ..Default::default()
+        };
+
+        self.set_proposer(propose.clone())?;
+        let v = self.phase1(None).await?;
+
+        propose.value = if let Some(_) = v.clone() {
+            v // 修复
+        } else {
+            value.clone() // 更新
+        };
+        self.set_proposer(propose)?;
+        self.phase2(None).await?;
+        Ok(value)
+    }
+
+    async fn phase1(&mut self, svr: Option<Vec<i32>>) -> Result<Option<Value>> {
+        return self.propose.phase1(svr).await;
+    }
+
+    async fn phase2(&mut self, svr: Option<Vec<i32>>) -> Result<()> {
+        return self.propose.phase2(svr).await;
+    }
+
+    fn set_proposer(&mut self, proposer: Proposer) -> Result<()> {
+        self.propose.set_proposer(proposer)
+    }
+
+    fn proposer(&mut self) -> Proposer {
+        let p = self.propose.proposer.clone();
+        p
     }
 }
 
@@ -618,7 +654,7 @@ mod test {
         bob.set_proposer(bob_prop).unwrap();
         let res = bob.phase2(None).await;
         assert!(res.is_ok());
-        assert_eq!(bob.proposer.value, Some(Value { value: 11 }));
+        assert_eq!(bob.proposer().value, Some(Value { value: 11 }));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
@@ -680,7 +716,7 @@ mod test {
         bob.set_proposer(bob_prop).unwrap();
         let res = bob.phase2(Some(vec![1, 2])).await;
         assert!(res.is_ok());
-        assert_eq!(bob.proposer.value, Some(Value { value: 11 }));
+        assert_eq!(bob.proposer().value, Some(Value { value: 11 }));
 
         // alice propose with round=3
         alice_prop = Proposer {
